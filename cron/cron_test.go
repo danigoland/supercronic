@@ -13,7 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/aptible/supercronic/crontab"
+	"supercronic/crontab"
 )
 
 var (

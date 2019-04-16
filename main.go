@@ -4,13 +4,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/aptible/supercronic/cron"
-	"github.com/aptible/supercronic/crontab"
-	"github.com/aptible/supercronic/log/hook"
 	"github.com/evalphobia/logrus_sentry"
 	"github.com/sirupsen/logrus"
 	"os"
 	"os/signal"
+	"supercronic/cron"
+	"supercronic/crontab"
+	"supercronic/log/hook"
 	"sync"
 	"syscall"
 	"time"
@@ -28,6 +28,8 @@ func main() {
 	splitLogs := flag.Bool("split-logs", false, "split log output into stdout/stderr")
 	sentry := flag.String("sentry-dsn", "", "enable Sentry error logging, using provided DSN")
 	sentryAlias := flag.String("sentryDsn", "", "alias for sentry-dsn")
+	sentryEnv := flag.String("sentryEnv", "", "environment tag for sentry-dsn")
+
 	overlapping := flag.Bool("overlapping", false, "enable tasks overlapping")
 	flag.Parse()
 
@@ -78,6 +80,9 @@ func main() {
 		if err != nil {
 			logrus.Fatalf("Could not init sentry logger: %s", err)
 		} else {
+			if *sentryEnv != "" {
+				sh.SetEnvironment(*sentryEnv)
+			}
 			sh.Timeout = 5 * time.Second
 			sentryHook = sh
 		}
