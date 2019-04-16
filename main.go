@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/evalphobia/logrus_sentry"
 	"github.com/sirupsen/logrus"
+	prefixed "github.com/x-cray/logrus-prefixed-formatter"
 	"os"
 	"os/signal"
 	"supercronic/cron"
@@ -29,6 +30,7 @@ func main() {
 	sentry := flag.String("sentry-dsn", "", "enable Sentry error logging, using provided DSN")
 	sentryAlias := flag.String("sentryDsn", "", "alias for sentry-dsn")
 	sentryEnv := flag.String("sentryEnv", "", "environment tag for sentry-dsn")
+	logPrefix := flag.String("prefix", "supercronic", "prefix for the logs(stored in the field 'prefix' if json is enabled)")
 
 	overlapping := flag.Bool("overlapping", false, "enable tasks overlapping")
 	flag.Parse()
@@ -50,7 +52,7 @@ func main() {
 	if *json {
 		logrus.SetFormatter(&logrus.JSONFormatter{})
 	} else {
-		logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
+		logrus.SetFormatter(&prefixed.TextFormatter{FullTimestamp: true})
 	}
 
 	if *splitLogs {
@@ -66,7 +68,7 @@ func main() {
 		os.Exit(2)
 		return
 	}
-
+	generalLogger := logrus.WithField("prefix", *logPrefix)
 	crontabFileName := flag.Args()[0]
 
 	var sentryHook *logrus_sentry.SentryHook
@@ -78,7 +80,7 @@ func main() {
 		}
 		sh, err := logrus_sentry.NewSentryHook(sentryDsn, sentryLevels)
 		if err != nil {
-			logrus.Fatalf("Could not init sentry logger: %s", err)
+			generalLogger.Fatalf("Could not init sentry logger: %s", err)
 		} else {
 			if *sentryEnv != "" {
 				sh.SetEnvironment(*sentryEnv)
@@ -93,16 +95,16 @@ func main() {
 	}
 
 	for true {
-		logrus.Infof("read crontab: %s", crontabFileName)
+		generalLogger.Infof("read crontab: %s", crontabFileName)
 		tab, err := readCrontabAtPath(crontabFileName)
 
 		if err != nil {
-			logrus.Fatal(err)
+			generalLogger.Fatal(err)
 			break
 		}
 
 		if *test {
-			logrus.Info("crontab is valid")
+			generalLogger.Info("crontab is valid")
 			os.Exit(0)
 			break
 		}
@@ -111,7 +113,7 @@ func main() {
 		exitCtx, notifyExit := context.WithCancel(context.Background())
 
 		for _, job := range tab.Jobs {
-			cronLogger := logrus.WithFields(logrus.Fields{
+			cronLogger := generalLogger.WithFields(logrus.Fields{
 				"job.schedule": job.Schedule,
 				"job.command":  job.Command,
 				"job.position": job.Position,
@@ -126,17 +128,17 @@ func main() {
 		termSig := <-termChan
 
 		if termSig == syscall.SIGUSR2 {
-			logrus.Infof("received %s, reloading crontab", termSig)
+			generalLogger.Infof("received %s, reloading crontab", termSig)
 		} else {
-			logrus.Infof("received %s, shutting down", termSig)
+			generalLogger.Infof("received %s, shutting down", termSig)
 		}
 		notifyExit()
 
-		logrus.Info("waiting for jobs to finish")
+		generalLogger.Info("waiting for jobs to finish")
 		wg.Wait()
 
 		if termSig != syscall.SIGUSR2 {
-			logrus.Info("exiting")
+			generalLogger.Info("exiting")
 			break
 		}
 	}
