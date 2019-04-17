@@ -1,0 +1,7 @@
+json: false
+prefix: dandi
+debug: false
+split-logs: false
+sentry:
+  dsn: ""
+  environment: localhost

@@ -7,6 +7,9 @@ import (
 	"github.com/evalphobia/logrus_sentry"
 	"github.com/sirupsen/logrus"
 	prefixed "github.com/x-cray/logrus-prefixed-formatter"
+	"gopkg.in/yaml.v2"
+	"io/ioutil"
+	"log"
 	"os"
 	"os/signal"
 	"supercronic/cron"
@@ -17,45 +20,96 @@ import (
 	"time"
 )
 
+type SentryConfig struct {
+	Dsn         string `json:"dsn" yaml:"dsn"`
+	Environment string `json:"environment" yaml:"environment"`
+}
+type Config struct {
+	Json        bool         `json:"json" yaml:"json"`
+	Debug       bool         `json:"debug" yaml:"debug"`
+	Prefix      string       `json:"prefix" yaml:"prefix"`
+	SplitLogs   bool         `json:"split-logs" yaml:"split-logs"`
+	Overlapping bool         `json:"overlapping" yaml:"overlapping"`
+	Sentry      SentryConfig `json:"sentry" yaml:"sentry"`
+}
+
 var Usage = func() {
 	fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS] CRONTAB\n\nAvailable options:\n", os.Args[0])
 	flag.PrintDefaults()
 }
 
 func main() {
+	confObject := Config{
+		Json:        false,
+		Debug:       false,
+		Prefix:      "supercronic",
+		Overlapping: false,
+		SplitLogs:   false,
+		Sentry: SentryConfig{
+			Dsn:         "",
+			Environment: "",
+		},
+	}
+
+	config := flag.String("config", "", "path to config file")
+
 	debug := flag.Bool("debug", false, "enable debug logging")
 	json := flag.Bool("json", false, "enable JSON logging")
 	test := flag.Bool("test", false, "test crontab (does not run jobs)")
 	splitLogs := flag.Bool("split-logs", false, "split log output into stdout/stderr")
-	sentry := flag.String("sentry-dsn", "", "enable Sentry error logging, using provided DSN")
+	sentryDSN := flag.String("sentry-dsn", "", "enable Sentry error logging, using provided DSN")
 	sentryAlias := flag.String("sentryDsn", "", "alias for sentry-dsn")
 	sentryEnv := flag.String("sentryEnv", "", "environment tag for sentry-dsn")
-	logPrefix := flag.String("prefix", "supercronic", "prefix for the logs(stored in the field 'prefix' if json is enabled)")
+	prefix := flag.String("prefix", "supercronic", "prefix for the logs(stored in the field 'prefix' if json is enabled)")
 
 	overlapping := flag.Bool("overlapping", false, "enable tasks overlapping")
 	flag.Parse()
 
-	var sentryDsn string
+	if *config != "" {
+		yamlFile, err := ioutil.ReadFile(*config)
+		if err != nil {
+			log.Fatalf("#%v ", err)
+		}
+		err = yaml.Unmarshal(yamlFile, &confObject)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+	}
+	confObject.Debug = *debug || confObject.Debug
+	confObject.Json = *json || confObject.Json
+	confObject.SplitLogs = *splitLogs || confObject.SplitLogs
+	confObject.Overlapping = *overlapping || confObject.Overlapping
+	if *sentryDSN != "" {
+		confObject.Sentry.Dsn = *sentryDSN
+	}
 
 	if *sentryAlias != "" {
-		sentryDsn = *sentryAlias
+		confObject.Sentry.Dsn = *sentryAlias
+	}
+	if *sentryEnv != "" {
+		confObject.Sentry.Environment = *sentryEnv
+	}
+	if *prefix != "" {
+		confObject.Prefix = *prefix
 	}
 
-	if *sentry != "" {
-		sentryDsn = *sentry
+	var sentryDsn string
+
+	if confObject.Sentry.Dsn != "" {
+		sentryDsn = confObject.Sentry.Dsn
 	}
 
-	if *debug {
+	if confObject.Debug {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
 
-	if *json {
+	if confObject.Json {
 		logrus.SetFormatter(&logrus.JSONFormatter{})
 	} else {
 		logrus.SetFormatter(&prefixed.TextFormatter{FullTimestamp: true})
 	}
 
-	if *splitLogs {
+	if confObject.SplitLogs {
 		hook.RegisterSplitLogger(
 			logrus.StandardLogger(),
 			os.Stdout,
@@ -68,7 +122,7 @@ func main() {
 		os.Exit(2)
 		return
 	}
-	generalLogger := logrus.WithField("prefix", *logPrefix)
+	generalLogger := logrus.WithField("prefix", confObject.Prefix)
 	crontabFileName := flag.Args()[0]
 
 	var sentryHook *logrus_sentry.SentryHook
@@ -82,8 +136,8 @@ func main() {
 		if err != nil {
 			generalLogger.Fatalf("Could not init sentry logger: %s", err)
 		} else {
-			if *sentryEnv != "" {
-				sh.SetEnvironment(*sentryEnv)
+			if confObject.Sentry.Environment != "" {
+				sh.SetEnvironment(confObject.Sentry.Environment)
 			}
 			sh.Timeout = 5 * time.Second
 			sentryHook = sh
@@ -119,7 +173,7 @@ func main() {
 				"job.position": job.Position,
 			})
 
-			cron.StartJob(&wg, tab.Context, job, exitCtx, cronLogger, *overlapping)
+			cron.StartJob(&wg, tab.Context, job, exitCtx, cronLogger, confObject.Overlapping)
 		}
 
 		termChan := make(chan os.Signal, 1)
